@@ -1,3 +1,5 @@
+# Build artifacts
+app-release.apk
 # Miscellaneous
 *.class
 *.log
