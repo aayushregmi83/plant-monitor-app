@@ -54,6 +54,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _sensorData != null && _sensorData!['soil_moisture'] != null
         ? '${_sensorData!['soil_moisture']} %'
         : '--';
+    final intensity =
+        _sensorData != null && _sensorData!['light_intensity'] != null
+        ? '${_sensorData!['light_intensity']} %'
+        : '--';
     final connected = _status != null && _status!['status'] == 'running';
     final isSimulated =
         _sensorData != null &&
@@ -104,6 +108,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       label: 'Soil Moisture',
                       value: moisture,
                       icon: Icons.grass,
+                    ),
+                  ),
+                  SizedBox(
+                    width: cardWidth,
+                    child: StatCard(
+                      label: 'Bulb Intensity',
+                      value: intensity,
+                      icon: Icons.lightbulb,
                     ),
                   ),
                 ],

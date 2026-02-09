@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import '../services/sensor_service.dart';
 import '../theme/app_theme.dart';
@@ -23,6 +24,9 @@ class _ControlCardState extends State<ControlCard> {
   bool _loading = false;
   ControlMode _mode = ControlMode.automatic;
   final stt.SpeechToText _speech = stt.SpeechToText();
+  final FlutterTts _tts = FlutterTts();
+  final TextEditingController _chatController = TextEditingController();
+  final List<_ChatMessage> _messages = [];
   bool _speechReady = false;
   bool _listening = false;
   String _lastVoice = '';
@@ -32,6 +36,21 @@ class _ControlCardState extends State<ControlCard> {
     super.initState();
     _loadCommands();
     _initSpeech();
+    _initTts();
+  }
+
+  @override
+  void dispose() {
+    _chatController.dispose();
+    _speech.stop();
+    _tts.stop();
+    super.dispose();
+  }
+
+  Future<void> _initTts() async {
+    await _tts.setLanguage('en-US');
+    await _tts.setSpeechRate(0.45);
+    await _tts.setPitch(1.0);
   }
 
   Future<void> _initSpeech() async {
@@ -119,44 +138,71 @@ class _ControlCardState extends State<ControlCard> {
     setState(() => _listening = started);
   }
 
-  void _handleVoiceCommand(String input) {
+  Future<void> _handleVoiceCommand(String input) async {
+    final result = _parseCommand(input);
+    await _applyCommand(result);
+  }
+
+  _CommandResult _parseCommand(String input) {
     final text = input.toLowerCase();
 
     if (text.contains('automatic')) {
-      _setMode(ControlMode.automatic);
-      _showMessage('Switched to automatic mode');
-      return;
+      return _CommandResult(
+        mode: ControlMode.automatic,
+        reply: 'Switched to automatic mode',
+      );
     }
 
     if (text.contains('manual')) {
-      _setMode(ControlMode.manual);
-      _showMessage('Switched to manual mode');
-      return;
+      return _CommandResult(
+        mode: ControlMode.manual,
+        reply: 'Switched to manual mode',
+      );
     }
 
     if (text.contains('voice')) {
-      _setMode(ControlMode.voice);
-      _showMessage('Voice mode enabled');
-      return;
+      return _CommandResult(
+        mode: ControlMode.voice,
+        reply: 'Voice mode enabled',
+      );
     }
 
     final updates = <String, dynamic>{};
+    final replyParts = <String>[];
 
     if (text.contains('fan')) {
-      if (text.contains('on')) updates['fan_state'] = true;
-      if (text.contains('off')) updates['fan_state'] = false;
+      if (text.contains('on')) {
+        updates['fan_state'] = true;
+        replyParts.add('turning on the fan');
+      }
+      if (text.contains('off')) {
+        updates['fan_state'] = false;
+        replyParts.add('turning off the fan');
+      }
       updates['fan_manual'] = true;
     }
 
     if (text.contains('pump')) {
-      if (text.contains('on')) updates['pump_state'] = true;
-      if (text.contains('off')) updates['pump_state'] = false;
+      if (text.contains('on')) {
+        updates['pump_state'] = true;
+        replyParts.add('turning on the pump');
+      }
+      if (text.contains('off')) {
+        updates['pump_state'] = false;
+        replyParts.add('turning off the pump');
+      }
       updates['pump_manual'] = true;
     }
 
     if (text.contains('bulb') || text.contains('light')) {
-      if (text.contains('on')) updates['bulb_state'] = true;
-      if (text.contains('off')) updates['bulb_state'] = false;
+      if (text.contains('on')) {
+        updates['bulb_state'] = true;
+        replyParts.add('turning on the bulb');
+      }
+      if (text.contains('off')) {
+        updates['bulb_state'] = false;
+        replyParts.add('turning off the bulb');
+      }
       updates['bulb_manual'] = true;
     }
 
@@ -167,6 +213,7 @@ class _ControlCardState extends State<ControlCard> {
       updates['fan_manual'] = true;
       updates['pump_manual'] = true;
       updates['bulb_manual'] = true;
+      replyParts.add('turning on all devices');
     }
 
     if (text.contains('all') && text.contains('off')) {
@@ -176,14 +223,35 @@ class _ControlCardState extends State<ControlCard> {
       updates['fan_manual'] = true;
       updates['pump_manual'] = true;
       updates['bulb_manual'] = true;
+      replyParts.add('turning off all devices');
     }
 
     if (updates.isEmpty) {
-      _showMessage('No matching command');
-      return;
+      return _CommandResult(reply: 'No matching command');
     }
 
-    _update(updates);
+    return _CommandResult(
+      updates: updates,
+      reply: replyParts.isEmpty ? 'Command applied' : replyParts.join(', '),
+    );
+  }
+
+  Future<void> _applyCommand(_CommandResult result) async {
+    if (result.mode != null) {
+      await _setMode(result.mode!);
+    }
+
+    if (result.updates.isNotEmpty) {
+      await _update(result.updates);
+    }
+
+    _showMessage(result.reply);
+    await _speak(result.reply);
+  }
+
+  Future<void> _speak(String message) async {
+    await _tts.stop();
+    await _tts.speak(message);
   }
 
   void _showMessage(String message) {
@@ -191,6 +259,22 @@ class _ControlCardState extends State<ControlCard> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void _addChatMessage(String text, {required bool fromUser}) {
+    setState(() {
+      _messages.add(_ChatMessage(text: text, fromUser: fromUser));
+    });
+  }
+
+  Future<void> _sendChat() async {
+    final text = _chatController.text.trim();
+    if (text.isEmpty) return;
+    _chatController.clear();
+    _addChatMessage(text, fromUser: true);
+    final result = _parseCommand(text);
+    await _applyCommand(result);
+    _addChatMessage(result.reply, fromUser: false);
   }
 
   Widget _switchRow(String label, String keyState) {
@@ -324,6 +408,89 @@ class _ControlCardState extends State<ControlCard> {
               ),
               const SizedBox(height: 12),
             ],
+            Card(
+              color: AppColors.light,
+              child: Padding(
+                padding: const EdgeInsets.all(12.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Command Chat',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      height: 140,
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.black12),
+                      ),
+                      child: _messages.isEmpty
+                          ? const Center(
+                              child: Text('Type commands if voice fails'),
+                            )
+                          : ListView.builder(
+                              itemCount: _messages.length,
+                              itemBuilder: (context, index) {
+                                final msg = _messages[index];
+                                final align = msg.fromUser
+                                    ? CrossAxisAlignment.end
+                                    : CrossAxisAlignment.start;
+                                final color = msg.fromUser
+                                    ? AppColors.primary.withOpacity(0.15)
+                                    : Colors.grey.shade200;
+                                return Column(
+                                  crossAxisAlignment: align,
+                                  children: [
+                                    Container(
+                                      margin: const EdgeInsets.symmetric(
+                                        vertical: 4,
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 6,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: color,
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: Text(msg.text),
+                                    ),
+                                  ],
+                                );
+                              },
+                            ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _chatController,
+                            decoration: const InputDecoration(
+                              hintText: 'Type a command... e.g., fan on',
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                            onSubmitted: (_) => _sendChat(),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton.icon(
+                          onPressed: _sendChat,
+                          icon: const Icon(Icons.send),
+                          label: const Text('Send'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
             _switchRow('Fan', 'fan_state'),
             _switchRow('Pump', 'pump_state'),
             _switchRow('Bulb', 'bulb_state'),
@@ -340,4 +507,23 @@ class _ControlCardState extends State<ControlCard> {
       ),
     );
   }
+}
+
+class _CommandResult {
+  final Map<String, dynamic> updates;
+  final ControlMode? mode;
+  final String reply;
+
+  const _CommandResult({
+    this.updates = const {},
+    this.mode,
+    this.reply = 'Command applied',
+  });
+}
+
+class _ChatMessage {
+  final String text;
+  final bool fromUser;
+
+  const _ChatMessage({required this.text, required this.fromUser});
 }

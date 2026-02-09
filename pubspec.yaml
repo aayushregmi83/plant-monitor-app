@@ -38,6 +38,7 @@ dependencies:
   google_fonts: ^6.2.1
   http: ^1.6.0
   image_picker: ^0.8.7+4
+  flutter_tts: ^4.0.2
   speech_to_text: ^7.0.0
   shared_preferences: ^2.1.1
 
