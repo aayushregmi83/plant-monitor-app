@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../services/api_service.dart';
 import '../widgets/detection_card.dart';
+import '../widgets/app_scaffold.dart';
+import '../theme/app_theme.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -42,84 +44,65 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Plant Monitor')),
-      drawer: Drawer(
-        child: ListView(
-          padding: EdgeInsets.zero,
-          children: [
-            const DrawerHeader(child: Text('Plant Monitor')),
-            ListTile(
-              leading: const Icon(Icons.camera),
-              title: const Text('Camera Feed'),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.pushNamed(context, '/camera');
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.settings),
-              title: const Text('Settings'),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.pushNamed(context, '/settings');
-              },
-            ),
-          ],
-        ),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(
-              child: Center(
-                child: _image == null
-                    ? const Text(
-                        'No image selected',
-                        style: TextStyle(fontSize: 18),
-                      )
-                    : Image.file(_image!),
+    return AppScaffold(
+      title: 'Image Detection',
+      subtitle: 'Upload a photo to identify fruits and vegetables',
+      currentRoute: '/detect',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(18.0),
+              child: Column(
+                children: [
+                  Container(
+                    height: 240,
+                    decoration: BoxDecoration(
+                      color: AppColors.light,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Center(
+                      child: _image == null
+                          ? const Text('No image selected')
+                          : Image.file(_image!, fit: BoxFit.cover),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  if (_loading) const LinearProgressIndicator(),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          icon: const Icon(Icons.photo_camera),
+                          label: const Text('Camera'),
+                          onPressed: () => _pick(ImageSource.camera),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          icon: const Icon(Icons.photo_library),
+                          label: const Text('Gallery'),
+                          onPressed: () => _pick(ImageSource.gallery),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  ElevatedButton.icon(
+                    onPressed: _image != null && !_loading ? _detect : null,
+                    icon: const Icon(Icons.search),
+                    label: const Text('Detect Objects'),
+                  ),
+                ],
               ),
             ),
-
-            const SizedBox(height: 12),
-
-            if (_loading) const LinearProgressIndicator(),
-
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.photo_camera),
-                    label: const Text('Camera'),
-                    onPressed: () => _pick(ImageSource.camera),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.photo_library),
-                    label: const Text('Gallery'),
-                    onPressed: () => _pick(ImageSource.gallery),
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 8),
-
-            ElevatedButton(
-              onPressed: _image != null && !_loading ? _detect : null,
-              child: const Text('Detect'),
-            ),
-
-            const SizedBox(height: 12),
-
-            if (_result != null) ...[DetectionCard(result: _result!)],
-          ],
-        ),
+          ),
+          const SizedBox(height: 20),
+          if (_result != null) DetectionCard(result: _result!),
+        ],
       ),
     );
   }

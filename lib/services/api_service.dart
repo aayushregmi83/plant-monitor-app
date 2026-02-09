@@ -35,4 +35,26 @@ class ApiService {
       return {'error': e.toString()};
     }
   }
+
+  Future<Map<String, dynamic>> detectDisease(File imageFile) async {
+    final effectiveBase = baseUrl ?? await _settings.getBackendUrl();
+    final uri = Uri.parse('$effectiveBase/api/detect-disease');
+
+    final request = http.MultipartRequest('POST', uri);
+    request.files.add(
+      await http.MultipartFile.fromPath('file', imageFile.path),
+    );
+
+    try {
+      final streamed = await request.send();
+      final resp = await http.Response.fromStream(streamed);
+
+      if (resp.statusCode >= 200 && resp.statusCode < 300) {
+        return json.decode(resp.body) as Map<String, dynamic>;
+      }
+      return {'error': 'Server returned ${resp.statusCode}', 'body': resp.body};
+    } catch (e) {
+      return {'error': e.toString()};
+    }
+  }
 }
