@@ -23,6 +23,15 @@ class _ControlCardState extends State<ControlCard> {
   Map<String, dynamic> _commands = {};
   bool _loading = false;
   ControlMode _mode = ControlMode.automatic;
+  bool _autoEnabled = true;
+  Map<String, dynamic> _thresholds = {};
+  final TextEditingController _tempHighController = TextEditingController();
+  final TextEditingController _tempLowController = TextEditingController();
+  final TextEditingController _moistureLowController = TextEditingController();
+  final TextEditingController _moistureHighController = TextEditingController();
+  final TextEditingController _lightLowController = TextEditingController();
+  final TextEditingController _lightHighController = TextEditingController();
+  bool _savingThresholds = false;
   final stt.SpeechToText _speech = stt.SpeechToText();
   final FlutterTts _tts = FlutterTts();
   final TextEditingController _chatController = TextEditingController();
@@ -42,6 +51,12 @@ class _ControlCardState extends State<ControlCard> {
   @override
   void dispose() {
     _chatController.dispose();
+    _tempHighController.dispose();
+    _tempLowController.dispose();
+    _moistureLowController.dispose();
+    _moistureHighController.dispose();
+    _lightLowController.dispose();
+    _lightHighController.dispose();
     _speech.stop();
     _tts.stop();
     super.dispose();
@@ -64,8 +79,12 @@ class _ControlCardState extends State<ControlCard> {
     final cmds = await widget.sensorService.getCommands(
       deviceId: widget.deviceId,
     );
+    final thresholds = await widget.sensorService.getThresholds();
     setState(() {
       _commands = cmds;
+      _autoEnabled = cmds['auto_enabled'] != false;
+      _thresholds = thresholds;
+      _hydrateThresholdControllers();
       if (_mode != ControlMode.voice) {
         _mode = _deriveMode(cmds);
       }
@@ -73,12 +92,85 @@ class _ControlCardState extends State<ControlCard> {
     });
   }
 
+  void _hydrateThresholdControllers() {
+    if (_thresholds.isEmpty) return;
+    _tempHighController.text = _thresholds['temp_high']?.toString() ?? '';
+    _tempLowController.text = _thresholds['temp_low']?.toString() ?? '';
+    _moistureLowController.text = _thresholds['moisture_low']?.toString() ?? '';
+    _moistureHighController.text =
+        _thresholds['moisture_high']?.toString() ?? '';
+    _lightLowController.text = _thresholds['intensity_low']?.toString() ?? '';
+    _lightHighController.text = _thresholds['intensity_high']?.toString() ?? '';
+  }
+
+  double? _parseDouble(TextEditingController controller) {
+    final raw = controller.text.trim();
+    if (raw.isEmpty) return null;
+    return double.tryParse(raw);
+  }
+
+  int? _parseInt(TextEditingController controller) {
+    final raw = controller.text.trim();
+    if (raw.isEmpty) return null;
+    return int.tryParse(raw);
+  }
+
+  Future<void> _saveThresholds() async {
+    setState(() => _savingThresholds = true);
+    final tempHigh = _parseDouble(_tempHighController);
+    final tempLow = _parseDouble(_tempLowController);
+    final moistureLow = _parseInt(_moistureLowController);
+    final moistureHigh = _parseInt(_moistureHighController);
+    final lightLow = _parseInt(_lightLowController);
+    final lightHigh = _parseInt(_lightHighController);
+
+    final updates = <String, dynamic>{};
+    if (tempHigh != null) updates['temp_high'] = tempHigh;
+    if (tempLow != null) updates['temp_low'] = tempLow;
+    if (moistureLow != null) updates['moisture_low'] = moistureLow;
+    if (moistureHigh != null) updates['moisture_high'] = moistureHigh;
+    if (lightLow != null) updates['intensity_low'] = lightLow;
+    if (lightHigh != null) updates['intensity_high'] = lightHigh;
+
+    final success =
+        updates.isNotEmpty &&
+        await widget.sensorService.updateThresholds(updates);
+    if (success) {
+      _thresholds.addAll(updates);
+      _showMessage('Thresholds saved');
+    } else {
+      _showMessage('Failed to save thresholds');
+    }
+
+    if (!mounted) return;
+    setState(() => _savingThresholds = false);
+  }
+
+  Widget _thresholdField({
+    required String label,
+    required String suffix,
+    required TextEditingController controller,
+  }) {
+    return Expanded(
+      child: TextField(
+        controller: controller,
+        keyboardType: const TextInputType.numberWithOptions(
+          decimal: true,
+          signed: false,
+        ),
+        decoration: InputDecoration(
+          labelText: label,
+          suffixText: suffix,
+          border: const OutlineInputBorder(),
+          isDense: true,
+        ),
+      ),
+    );
+  }
+
   ControlMode _deriveMode(Map<String, dynamic> cmds) {
-    final manualEnabled =
-        (cmds['fan_manual'] == true) ||
-        (cmds['pump_manual'] == true) ||
-        (cmds['bulb_manual'] == true);
-    return manualEnabled ? ControlMode.manual : ControlMode.automatic;
+    final autoEnabled = cmds['auto_enabled'] != false;
+    return autoEnabled ? ControlMode.automatic : ControlMode.manual;
   }
 
   Future<void> _update(Map<String, dynamic> updates) async {
@@ -90,6 +182,15 @@ class _ControlCardState extends State<ControlCard> {
     if (success) {
       // merge updates into local state
       _commands.addAll(updates);
+      if (updates.containsKey('auto_enabled')) {
+        _autoEnabled = updates['auto_enabled'] == true;
+        if (!_autoEnabled && _mode == ControlMode.automatic) {
+          _mode = ControlMode.manual;
+        }
+        if (_autoEnabled && _mode == ControlMode.manual) {
+          _mode = ControlMode.automatic;
+        }
+      }
     }
     setState(() => _loading = false);
   }
@@ -98,17 +199,40 @@ class _ControlCardState extends State<ControlCard> {
     setState(() => _mode = mode);
     if (mode == ControlMode.automatic) {
       await _update({
+        'auto_enabled': true,
         'fan_manual': false,
         'pump_manual': false,
         'bulb_manual': false,
       });
     } else {
       await _update({
+        'auto_enabled': false,
         'fan_manual': true,
         'pump_manual': true,
         'bulb_manual': true,
       });
     }
+  }
+
+  Future<void> _setAutoEnabled(bool enabled) async {
+    if (enabled) {
+      await _update({
+        'auto_enabled': true,
+        'fan_manual': false,
+        'pump_manual': false,
+        'bulb_manual': false,
+      });
+      setState(() => _mode = ControlMode.automatic);
+      return;
+    }
+
+    await _update({
+      'auto_enabled': false,
+      'fan_manual': true,
+      'pump_manual': true,
+      'bulb_manual': true,
+    });
+    setState(() => _mode = ControlMode.manual);
   }
 
   Future<void> _toggleListening() async {
@@ -277,7 +401,7 @@ class _ControlCardState extends State<ControlCard> {
     _addChatMessage(result.reply, fromUser: false);
   }
 
-  Widget _switchRow(String label, String keyState) {
+  Widget _switchRow(String label, String keyState, String keyManual) {
     final state = _commands[keyState] == true;
 
     return Column(
@@ -324,8 +448,12 @@ class _ControlCardState extends State<ControlCard> {
                   Switch(
                     value: state,
                     activeColor: AppColors.primary,
-                    onChanged: _mode == ControlMode.manual
-                        ? (v) => _update({keyState: v})
+                    onChanged: !_autoEnabled
+                        ? (v) => _update({
+                            keyState: v,
+                            keyManual: true,
+                            'auto_enabled': false,
+                          })
                         : null,
                   ),
                 ],
@@ -379,6 +507,109 @@ class _ControlCardState extends State<ControlCard> {
               onSelectionChanged: (value) => _setMode(value.first),
             ),
             const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.light,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Automatic control',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  Switch(
+                    value: _autoEnabled,
+                    activeColor: AppColors.primary,
+                    onChanged: (v) => _setAutoEnabled(v),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Card(
+              color: AppColors.light,
+              child: Padding(
+                padding: const EdgeInsets.all(12.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Automatic thresholds',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        _thresholdField(
+                          label: 'Temp High',
+                          suffix: 'C',
+                          controller: _tempHighController,
+                        ),
+                        const SizedBox(width: 8),
+                        _thresholdField(
+                          label: 'Temp Low',
+                          suffix: 'C',
+                          controller: _tempLowController,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        _thresholdField(
+                          label: 'Moisture Low',
+                          suffix: '%',
+                          controller: _moistureLowController,
+                        ),
+                        const SizedBox(width: 8),
+                        _thresholdField(
+                          label: 'Moisture High',
+                          suffix: '%',
+                          controller: _moistureHighController,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        _thresholdField(
+                          label: 'Light Low',
+                          suffix: '%',
+                          controller: _lightLowController,
+                        ),
+                        const SizedBox(width: 8),
+                        _thresholdField(
+                          label: 'Light High',
+                          suffix: '%',
+                          controller: _lightHighController,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: ElevatedButton.icon(
+                        onPressed: _savingThresholds ? null : _saveThresholds,
+                        icon: _savingThresholds
+                            ? const SizedBox(
+                                height: 18,
+                                width: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.save),
+                        label: const Text('Save Thresholds'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
             if (_mode == ControlMode.voice) ...[
               Row(
                 children: [
@@ -491,9 +722,9 @@ class _ControlCardState extends State<ControlCard> {
               ),
             ),
             const SizedBox(height: 12),
-            _switchRow('Fan', 'fan_state'),
-            _switchRow('Pump', 'pump_state'),
-            _switchRow('Bulb', 'bulb_state'),
+            _switchRow('Fan', 'fan_state', 'fan_manual'),
+            _switchRow('Pump', 'pump_state', 'pump_manual'),
+            _switchRow('Bulb', 'bulb_state', 'bulb_manual'),
             Align(
               alignment: Alignment.centerRight,
               child: ElevatedButton.icon(
